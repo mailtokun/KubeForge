@@ -1,0 +1,86 @@
+---
+- name: Setup Kubernetes Cluster
+  hosts: all
+  become: yes
+  tasks:
+
+    - name: Install containerd
+      apt:
+        name: containerd
+        state: present
+        update_cache: yes
+
+    - name: Install Kubernetes packages (kubelet, kubeadm, kubectl)
+      apt:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: present
+        update_cache: yes
+
+    - name: Ensure kubelet is enabled and started
+      systemd:
+        name: kubelet
+        enabled: yes
+        state: started
+
+    - name: Ensure containerd is enabled and started
+      systemd:
+        name: containerd
+        enabled: yes
+        state: started
+
+- name: Initialize Kubernetes Master Node
+  hosts: master
+  become: yes
+  tasks:
+
+    - name: Initialize Kubernetes master using kubeadm
+      command: kubeadm init --pod-network-cidr=10.244.0.0/16
+      register: kubeadm_init
+      changed_when: "'is the master' in kubeadm_init.stdout"
+
+    - name: Copy kubeadm config to user's home
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "{{ ansible_user_dir }}/.kube/config"
+        remote_src: yes
+        mode: 0600
+
+    - name: Set kubeconfig ownership
+      file:
+        path: "{{ ansible_user_dir }}/.kube/config"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: 0600
+
+    - name: Save kubeadm join token and hash
+      command: kubeadm token create
+      register: kubeadm_token
+      changed_when: false
+
+    - name: Save CA cert hash
+      command: kubeadm certs ca-cert-hash
+      register: ca_cert_hash
+      changed_when: false
+
+    - name: Output kubeadm token and hash
+      debug:
+        msg: "Kubeadm Token: {{ kubeadm_token.stdout }} | CA Cert Hash: {{ ca_cert_hash.stdout }}"
+
+    - name: Apply Flannel network plugin
+      kubectl:
+        kubeconfig: "{{ ansible_user_dir }}/.kube/config"
+        namespace: kube-system
+        state: present
+        definition: "{{ lookup('url', 'https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml') }}"
+
+- name: Join Kubernetes Worker Nodes
+  hosts: workers
+  become: yes
+  tasks:
+
+    - name: Join worker node to Kubernetes cluster
+      command: kubeadm join {{ hostvars['master']['ansible_host'] }}:6443 --token {{ hostvars['master']['kubeadm_token.stdout }} --discovery-token-ca-cert-hash sha256:{{ hostvars['master']['ca_cert_hash.stdout'] }}
+      when: hostvars['master']['kubeadm_token.stdout'] is defined and hostvars['master']['ca_cert_hash.stdout'] is defined
