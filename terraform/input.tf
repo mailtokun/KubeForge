@@ -2,18 +2,15 @@
 variable "node_ips" {
   description = "List of IP addresses for the bare metal nodes"
   type        = list(string)
-  default     = ["172.16.8.116", "172.16.8.117"]
 }
 
 variable "master_ip" {
   description = "master IP"
   type        = string
-  default     = "172.16.8.116"
 }
 variable "worker_ips" {
   description = "List of IP addresses for the bare metal nodes"
   type        = list(string)
-  default     = ["172.16.8.117","172.16.8.118"]
 }
 
 
